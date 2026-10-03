@@ -1,0 +1,1331 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#0b0f22">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-192.png">
+<title>Bean Bag Toss</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Lilita+One&family=Nunito:wght@600;800;900&display=swap" rel="stylesheet">
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
+<style>
+  :root {
+    --ink: #fff6e6;
+    --muted: #cbbfd9;
+    --blue: #3b82e6;
+    --blue-soft: #9cc2ff;
+    --red: #e5483d;
+    --red-soft: #ffa59d;
+    --gold: #ffc94a;
+    --gold-deep: #b07a17;
+    --panel: rgba(14, 16, 38, 0.72);
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; height: 100%; overflow: hidden; overscroll-behavior: none;
+    background: #0b0f22;
+  }
+  body {
+    display: flex; align-items: center; justify-content: center;
+    font-family: 'Nunito', system-ui, -apple-system, 'Segoe UI', sans-serif;
+    color: var(--ink);
+    user-select: none; -webkit-user-select: none;
+    -webkit-tap-highlight-color: transparent;
+  }
+  #stage { position: relative; overflow: hidden; background: #121633; }
+  #stage.framed { border-radius: 20px; box-shadow: 0 30px 90px rgba(0,0,0,.65); }
+  canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; }
+  #ui { position: absolute; left: 0; top: 0; width: 400px; height: 640px; transform-origin: 0 0; pointer-events: none; }
+  #ui button, #ui input, #ui .live { pointer-events: auto; }
+  .hidden { display: none !important; }
+
+  /* ---------- HUD ---------- */
+  .hud { position: absolute; top: 12px; left: 12px; right: 12px; display: flex; gap: 8px; align-items: stretch; }
+  .team {
+    flex: 1; display: flex; align-items: center; gap: 10px;
+    padding: 8px 12px; border-radius: 14px;
+    background: rgba(10, 12, 30, .58);
+    -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px);
+    border: 2px solid rgba(255,255,255,.07);
+    transition: border-color .3s, box-shadow .3s, transform .3s;
+  }
+  .team.red { flex-direction: row-reverse; text-align: right; }
+  .team.blue { color: var(--blue-soft); }
+  .team.red { color: var(--red-soft); }
+  .team.active { border-color: currentColor; transform: translateY(1px); }
+  .team.blue.active { box-shadow: 0 0 22px rgba(59,130,230,.45); }
+  .team.red.active { box-shadow: 0 0 22px rgba(229,72,61,.45); }
+  .team .score { font-family: 'Lilita One', sans-serif; font-size: 34px; line-height: 1; color: #fff; min-width: 30px; text-align: center; }
+  .team .meta { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
+  .team .name { font-size: 13px; font-weight: 900; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .pips { display: flex; gap: 4px; }
+  .team.red .pips { justify-content: flex-end; }
+  .pip { width: 10px; height: 10px; border-radius: 3px; background: currentColor; opacity: .22; transition: opacity .3s, transform .3s; }
+  .pip.on { opacity: 1; }
+  .inning { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 0 4px; font-size: 11px; font-weight: 800; color: var(--muted); }
+  .inning b { font-family: 'Lilita One', sans-serif; font-weight: 400; font-size: 24px; color: var(--gold); line-height: 1.05; }
+
+  .turn {
+    position: absolute; top: 84px; left: 0; right: 0; text-align: center;
+    font-weight: 900; font-size: 15px; letter-spacing: .01em;
+    text-shadow: 0 2px 10px rgba(0,0,0,.7);
+  }
+  .turn .dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 7px; vertical-align: 1px; }
+
+  .hint {
+    position: absolute; top: 108px; left: 0; right: 0; text-align: center;
+    font-size: 13px; font-weight: 800; color: var(--muted); opacity: .85;
+    text-shadow: 0 2px 8px rgba(0,0,0,.8);
+    transition: opacity .5s;
+  }
+  .corner { position: absolute; bottom: 14px; display: flex; gap: 8px; }
+  .corner.left { left: 14px; } .corner.right { right: 14px; }
+  .chip {
+    font: 800 13px 'Nunito', sans-serif; color: var(--ink);
+    background: rgba(10,12,30,.55); border: 1.5px solid rgba(255,255,255,.18);
+    padding: 8px 13px; border-radius: 999px; cursor: pointer;
+    -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px);
+  }
+  .chip:active { transform: scale(.96); }
+
+  .toast {
+    position: absolute; top: 200px; left: 0; right: 0; text-align: center;
+    font-family: 'Lilita One', sans-serif; font-size: 50px; line-height: 1;
+    opacity: 0; pointer-events: none;
+  }
+  .toast small { display: block; font-family: 'Nunito', sans-serif; font-weight: 900; font-size: 18px; margin-top: 6px; }
+  .toast.show { animation: pop 1.6s cubic-bezier(.2,.9,.3,1.2) forwards; }
+  .toast.hole { color: var(--gold); text-shadow: 0 4px 0 #9c4f12, 0 0 34px rgba(255,201,74,.7); font-size: 60px; }
+  .toast.board { color: #fff; text-shadow: 0 4px 0 rgba(0,0,0,.45), 0 0 20px rgba(255,255,255,.3); }
+  .toast.off { color: #d6cbe4; text-shadow: 0 3px 0 rgba(0,0,0,.5); font-size: 40px; }
+  @keyframes pop {
+    0% { opacity: 0; transform: scale(.4) rotate(-8deg); }
+    14% { opacity: 1; transform: scale(1.14) rotate(-3deg); }
+    28% { transform: scale(1) rotate(-3deg); }
+    78% { opacity: 1; transform: scale(1) rotate(-3deg) translateY(0); }
+    100% { opacity: 0; transform: scale(.96) rotate(-3deg) translateY(-24px); }
+  }
+
+  /* ---------- Screens & panels ---------- */
+  .screen {
+    position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center;
+    padding: 0 30px;
+  }
+  #menu { background: linear-gradient(180deg, rgba(8,10,28,.05) 0%, rgba(8,10,28,.2) 45%, rgba(8,10,28,.86) 72%); }
+  .title {
+    margin: 120px 0 0; text-align: center;
+    font-family: 'Lilita One', sans-serif; font-weight: 400;
+    font-size: 64px; line-height: .92; color: #ffe7b8;
+    transform: rotate(-4deg);
+    text-shadow: 0 2px 0 #e9a64a, 0 4px 0 #c27a2c, 0 6px 0 #8f4f1c, 0 10px 18px rgba(0,0,0,.55), 0 0 40px rgba(255,190,90,.35);
+  }
+  .title span { display: block; font-size: 86px; color: var(--gold); }
+  .tagline { margin-top: 18px; font-weight: 800; font-size: 14px; color: var(--muted); text-align: center; text-shadow: 0 2px 6px rgba(0,0,0,.8); }
+  .menu-actions { margin-top: auto; margin-bottom: 34px; width: 100%; display: flex; flex-direction: column; gap: 11px; }
+  .btn {
+    font: 900 17px 'Nunito', sans-serif; width: 100%; padding: 15px 18px;
+    border-radius: 14px; border: none; cursor: pointer;
+    background: var(--gold); color: #2a1a06;
+    box-shadow: 0 5px 0 var(--gold-deep), 0 10px 20px rgba(0,0,0,.35);
+    transition: transform .08s, box-shadow .08s;
+  }
+  .btn:active { transform: translateY(3px); box-shadow: 0 2px 0 var(--gold-deep), 0 4px 10px rgba(0,0,0,.35); }
+  .btn.ghost { background: rgba(255,255,255,.1); color: var(--ink); box-shadow: inset 0 0 0 1.5px rgba(255,255,255,.28); }
+  .btn.ghost:active { transform: translateY(2px); }
+  .btn:disabled { opacity: .5; cursor: default; }
+  .btn:focus-visible, .chip:focus-visible, input:focus-visible { outline: 3px solid #fff; outline-offset: 3px; }
+  .rules { font-size: 12.5px; font-weight: 700; color: var(--muted); text-align: center; line-height: 1.45; margin: 4px 0 0; }
+
+  .panel {
+    position: absolute; left: 24px; right: 24px; top: 50%; transform: translateY(-50%);
+    background: var(--panel); border: 1.5px solid rgba(255,255,255,.14);
+    -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px);
+    border-radius: 22px; padding: 24px 22px 22px; text-align: center;
+    box-shadow: 0 24px 60px rgba(0,0,0,.5);
+  }
+  .panel h2 { margin: 0 0 6px; font-family: 'Lilita One', sans-serif; font-weight: 400; font-size: 34px; line-height: 1.05; }
+  .panel p { margin: 0 0 14px; font-weight: 700; color: var(--muted); font-size: 14.5px; line-height: 1.45; }
+  .panel .stack { display: flex; flex-direction: column; gap: 10px; margin-top: 16px; }
+  .code {
+    font-family: 'Lilita One', sans-serif; font-size: 54px; letter-spacing: .14em; color: var(--gold);
+    margin: 6px 0 10px; text-shadow: 0 4px 0 #8f4f1c;
+    padding-left: .14em;
+  }
+  input.code-input {
+    width: 100%; font: 400 38px 'Lilita One', sans-serif; letter-spacing: .2em; text-align: center; text-transform: uppercase;
+    background: rgba(0,0,0,.35); color: var(--gold); border: 2px solid rgba(255,255,255,.2);
+    border-radius: 14px; padding: 10px 6px; padding-left: .2em; outline: none;
+  }
+  .err { color: #ffb4a8; font-weight: 800; font-size: 13.5px; min-height: 18px; margin-top: 8px; }
+  .inning-lines { display: flex; justify-content: center; gap: 22px; margin: 12px 0 8px; }
+  .inning-lines div { font-weight: 900; font-size: 15px; }
+  .inning-lines b { display: block; font-family: 'Lilita One', sans-serif; font-weight: 400; font-size: 40px; color: #fff; }
+  .big-result { font-family: 'Lilita One', sans-serif; font-size: 22px; color: var(--gold); }
+  .final-score { font-family: 'Lilita One', sans-serif; font-size: 46px; margin: 4px 0 6px; }
+  .final-score .b { color: var(--blue-soft); } .final-score .r { color: var(--red-soft); }
+
+  @media (prefers-reduced-motion: reduce) {
+    .toast.show { animation-duration: .01s; opacity: 1; animation: none; }
+  }
+</style>
+</head>
+<body>
+<div id="stage">
+  <canvas id="c"></canvas>
+  <div id="ui">
+    <!-- In-game HUD -->
+    <div id="hud" class="hidden">
+      <div class="hud">
+        <div class="team blue" id="teamBlue">
+          <div class="score" id="scoreBlue">0</div>
+          <div class="meta"><div class="name" id="nameBlue">Blue</div><div class="pips" id="pipsBlue"></div></div>
+        </div>
+        <div class="inning">Inning<b id="inningNum">1</b></div>
+        <div class="team red" id="teamRed">
+          <div class="score" id="scoreRed">0</div>
+          <div class="meta"><div class="name" id="nameRed">Red</div><div class="pips" id="pipsRed"></div></div>
+        </div>
+      </div>
+      <div class="turn" id="turn"></div>
+      <div class="hint" id="hint">Hold the bag, swing it up and let go</div>
+      <div class="corner left"><button class="chip" id="quitBtn">Menu</button></div>
+      <div class="corner right"><button class="chip" id="soundBtn" aria-label="Toggle sound">Sound on</button></div>
+    </div>
+
+    <div class="toast" id="toast"></div>
+
+    <!-- Main menu -->
+    <div id="menu" class="screen">
+      <h1 class="title">Bean Bag<span>Toss</span></h1>
+      <div class="tagline">A backyard game under the string lights</div>
+      <div class="menu-actions" id="menuMain">
+        <button class="btn" id="onlineBtn">Play a friend online</button>
+        <button class="btn ghost" id="cpuBtn">Play the computer</button>
+        <button class="btn ghost" id="localBtn">Pass and play on this device</button>
+        <p class="rules">Hole is 3 points, board is 1. Points cancel each inning.<br>First to 21 wins.</p>
+      </div>
+      <div class="menu-actions hidden" id="menuOnline">
+        <button class="btn" id="createBtn">Create a game</button>
+        <input class="code-input" id="codeInput" maxlength="4" placeholder="CODE" autocomplete="off" autocapitalize="characters" spellcheck="false" aria-label="Game code">
+        <button class="btn ghost" id="joinBtn">Join with code</button>
+        <div class="err" id="onlineErr"></div>
+        <button class="chip" id="backBtn" style="align-self:center">Back</button>
+      </div>
+    </div>
+
+    <!-- Waiting room -->
+    <div id="waitPanel" class="panel hidden">
+      <h2>Waiting for your friend</h2>
+      <p>Send them this code or the invite link. You throw blue and go first.</p>
+      <div class="code" id="waitCode">----</div>
+      <div class="stack">
+        <button class="btn" id="copyBtn">Copy invite link</button>
+        <button class="btn ghost" id="cancelWaitBtn">Cancel</button>
+      </div>
+    </div>
+
+    <!-- Inning summary -->
+    <div id="inningPanel" class="panel hidden">
+      <h2 id="inningTitle">End of inning</h2>
+      <div class="inning-lines">
+        <div style="color:var(--blue-soft)"><span id="inBlueName">Blue</span><b id="inBlue">0</b></div>
+        <div style="color:var(--red-soft)"><span id="inRedName">Red</span><b id="inRed">0</b></div>
+      </div>
+      <div class="big-result" id="inningResult"></div>
+    </div>
+
+    <!-- Game over -->
+    <div id="overPanel" class="panel hidden">
+      <h2 id="overTitle">Blue wins!</h2>
+      <div class="final-score"><span class="b" id="finBlue">21</span> <span style="opacity:.5">–</span> <span class="r" id="finRed">12</span></div>
+      <p id="overSub"></p>
+      <div class="stack">
+        <button class="btn" id="againBtn">Play again</button>
+        <button class="btn ghost" id="overMenuBtn">Back to menu</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+/* =====================================================================
+   FIREBASE SETUP
+   Paste your project's config below (Firebase console > Project settings
+   > Your apps > Web app). databaseURL is required for online play.
+   ===================================================================== */
+const FIREBASE_CONFIG = {
+  apiKey: "AIzaSyCZGzzuV5wAqdFynnuGyfhGTJrxtJfeNtU",
+  authDomain: "bean-bag-toss.firebaseapp.com",
+  databaseURL: "https://bean-bag-toss-default-rtdb.europe-west1.firebasedatabase.app",
+  projectId: "bean-bag-toss",
+  storageBucket: "bean-bag-toss.firebasestorage.app",
+  messagingSenderId: "353523421656",
+  appId: "1:353523421656:web:ec23e99e99aa315d60e2ad",
+  measurementId: "G-SX3HC1ZR0L"
+};
+
+/* =====================================================================
+   WORLD + PHYSICS  (units: feet, seconds)
+   The camera stands behind the throw line looking down the lawn.
+   ===================================================================== */
+const W = 400, H = 640;
+const F = 1600, HZ = 150, CX = 200, CAMH = 4;     // projection
+const DF = 18, DB = 22, BW = 1, ZF = 0.25, ZB = 1.0; // board: front/back distance, half width, heights
+const HOLE_D = 21.25, HOLE_R = 0.25;
+const BAG = 0.22, BR = 0.21;                      // bag half-size (draw), collision radius
+const G = 32, STEP = 1 / 120;
+const START = { x: 0, d: 6.5, z: 2.3 };
+
+function proj(x, d, z) { const s = F / d; return { x: CX + x * s, y: HZ + (CAMH - z) * s, s }; }
+function boardZ(d) { return ZF + (d - DF) / (DB - DF) * (ZB - ZF); }
+function onBoard(x, d) { return x >= -BW && x <= BW && d >= DF && d <= DB; }
+function holeDist(x, d) { const dx = x, dd = d - HOLE_D; return Math.sqrt(dx * dx + dd * dd); }
+
+function makeBag(p, t) {
+  return { p, x: t.x0 || 0, d: START.d, z: START.z, pd: START.d, vx: t.vx, vd: t.vd, vz: t.vz,
+           rot: t.rot0, spin: t.spin, st: 'air', surf: null, ft: 0 };
+}
+
+// One fixed physics step. Deterministic so both players see the same throw.
+function physStep(bags, dt, ev) {
+  for (const b of bags) {
+    const pd = b.d;
+    if (b.st === 'air') {
+      b.t = (b.t || 0) + dt;
+      b.vz -= G * dt;
+      b.x += b.vx * dt; b.d += b.vd * dt; b.z += b.vz * dt;
+      b.rot += b.spin * dt;
+      // Smack into the front face of the board
+      if (pd < DF && b.d >= DF && b.x >= -BW && b.x <= BW && b.z < ZF) {
+        b.d = DF - 0.01; b.vd = -b.vd * 0.2; b.vx *= 0.5;
+        if (ev) ev.push({ type: 'knock', b });
+      }
+      const on = onBoard(b.x, b.d);
+      const sz = on ? boardZ(b.d) : 0;
+      if (b.vz < 0 && b.z <= sz) {
+        b.z = sz;
+        if (on && holeDist(b.x, b.d) < HOLE_R * 0.78) {
+          b.st = 'fall'; b.ft = 0; b.surf = 'b';
+          if (ev) ev.push({ type: 'hole', b });
+        } else if (on) {
+          const sp = Math.sqrt(b.vx * b.vx + b.vd * b.vd);
+          b.st = 'slide'; b.surf = 'b'; b.vx *= 0.45; b.vd *= 0.38; b.vz = 0; b.spin *= 0.4;
+          if (ev) ev.push({ type: 'land', surf: 'b', b, sp });
+        } else {
+          b.st = 'slide'; b.surf = 'g'; b.vx *= 0.3; b.vd *= 0.25; b.vz = 0; b.spin *= 0.2;
+          if (ev) ev.push({ type: 'land', surf: 'g', b });
+        }
+      }
+    } else if (b.st === 'slide') {
+      const sp = Math.sqrt(b.vx * b.vx + b.vd * b.vd);
+      const dec = (b.surf === 'b' ? 11 : 28) * dt;
+      if (sp <= dec) { b.vx = 0; b.vd = 0; b.st = 'rest'; }
+      else { const k = (sp - dec) / sp; b.vx *= k; b.vd *= k; }
+      b.x += b.vx * dt; b.d += b.vd * dt;
+      b.rot += b.spin * dt; b.spin *= 0.97;
+      if (b.surf === 'b') {
+        if (!onBoard(b.x, b.d)) {           // slid off an edge
+          b.st = 'air'; b.vz = 0; b.surf = null;
+        } else {
+          b.z = boardZ(b.d);
+          if (holeDist(b.x, b.d) < HOLE_R * 0.9) {
+            b.st = 'fall'; b.ft = 0;
+            if (ev) ev.push({ type: 'hole', b });
+          }
+        }
+      } else {
+        b.z = 0;
+        if (onBoard(b.x, b.d)) {            // ground bag bumps the board body
+          if (pd < DF) { b.d = DF - 0.01; b.vd = -b.vd * 0.2; }
+          else if (pd > DB) { b.d = DB + 0.01; b.vd = -b.vd * 0.2; }
+          else { b.x = b.x < 0 ? -BW - 0.01 : BW + 0.01; b.vx = -b.vx * 0.2; }
+        }
+      }
+    } else if (b.st === 'fall') {
+      b.ft += dt;
+      if (b.ft > 0.35) b.st = 'in';
+    }
+  }
+  // Bag-on-bag pushes
+  for (let i = 0; i < bags.length; i++) {
+    const a = bags[i];
+    if (a.st !== 'slide' && a.st !== 'rest') continue;
+    for (let j = i + 1; j < bags.length; j++) {
+      const c = bags[j];
+      if ((c.st !== 'slide' && c.st !== 'rest') || c.surf !== a.surf) continue;
+      const dx = c.x - a.x, dd = c.d - a.d;
+      const dist = Math.sqrt(dx * dx + dd * dd);
+      if (dist >= BR * 2 || dist === 0) continue;
+      const nx = dx / dist, nd = dd / dist;
+      const rel = (c.vx - a.vx) * nx + (c.vd - a.vd) * nd;
+      if (rel < 0) {
+        const imp = -(1.25) * rel / 2;
+        a.vx -= imp * nx; a.vd -= imp * nd;
+        c.vx += imp * nx; c.vd += imp * nd;
+        if (ev && imp > 1.5) ev.push({ type: 'bump', b: c });
+      }
+      const push = (BR * 2 - dist) / 2;
+      a.x -= nx * push; a.d -= nd * push; c.x += nx * push; c.d += nd * push;
+      for (const q of [a, c]) if (Math.abs(q.vx) + Math.abs(q.vd) > 0.02) q.st = 'slide';
+    }
+  }
+}
+function allSettled(bags) { return bags.every(b => b.st === 'rest' || b.st === 'in'); }
+
+function serBag(b) { return { p: b.p, x: b.x, d: b.d, r: b.rot, s: b.st === 'in' ? 'h' : b.surf }; }
+function fromSer(o) {
+  const s = o.s;
+  return { p: o.p, x: o.x, d: o.d, pd: o.d, rot: o.r || 0, spin: 0, vx: 0, vd: 0, vz: 0, ft: 0,
+           st: s === 'h' ? 'in' : 'rest', surf: s === 'h' ? 'b' : s, z: s === 'b' ? boardZ(o.d) : 0 };
+}
+function bagPoints(b) {
+  if (b.st === 'in') return 3;
+  if (b.surf === 'b' && onBoard(b.x, b.d)) return 1;
+  return 0;
+}
+
+/* =====================================================================
+   CANVAS + STATIC SCENE
+   ===================================================================== */
+const stage = document.getElementById('stage');
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+const ui = document.getElementById('ui');
+let K = 1, DPR = 1;
+let bgLayer, boardLayer, bulbs = [], glowSprite;
+
+function rng(seed) { return function () { seed |= 0; seed = seed + 0x6D2B79F5 | 0; let t = Math.imul(seed ^ seed >>> 15, 1 | seed); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+
+function resize() {
+  const vw = window.innerWidth, vh = window.innerHeight;
+  K = Math.min(vw / W, vh / H);
+  const fill = vw / W < 1.15 || vh / H < 1.02;
+  if (!fill) K *= 0.96;
+  stage.classList.toggle('framed', !fill);
+  stage.style.width = (W * K) + 'px';
+  stage.style.height = (H * K) + 'px';
+  ui.style.transform = `scale(${K})`;
+  DPR = Math.min(window.devicePixelRatio || 1, 2);
+  canvas.width = Math.round(W * K * DPR);
+  canvas.height = Math.round(H * K * DPR);
+  buildStatic();
+}
+
+function layer() {
+  const c = document.createElement('canvas');
+  c.width = canvas.width; c.height = canvas.height;
+  const g = c.getContext('2d');
+  g.setTransform(K * DPR, 0, 0, K * DPR, 0, 0);
+  return [c, g];
+}
+
+function buildStatic() {
+  let g;
+  [bgLayer, g] = layer(); drawBackground(g);
+  [boardLayer, g] = layer(); drawBoard(g);
+  // soft glow sprite for string-light bulbs
+  glowSprite = document.createElement('canvas');
+  glowSprite.width = glowSprite.height = 64;
+  const s = glowSprite.getContext('2d');
+  const gr = s.createRadialGradient(32, 32, 0, 32, 32, 32);
+  gr.addColorStop(0, 'rgba(255,214,140,.95)');
+  gr.addColorStop(.25, 'rgba(255,190,100,.45)');
+  gr.addColorStop(1, 'rgba(255,170,80,0)');
+  s.fillStyle = gr; s.fillRect(0, 0, 64, 64);
+}
+
+function drawBackground(g) {
+  const R = rng(7);
+  // Dusk sky
+  let gr = g.createLinearGradient(0, 0, 0, HZ + 10);
+  gr.addColorStop(0, '#0d1230'); gr.addColorStop(.55, '#25204d'); gr.addColorStop(1, '#6a3c5c');
+  g.fillStyle = gr; g.fillRect(0, 0, W, HZ + 10);
+  // Stars
+  for (let i = 0; i < 80; i++) {
+    const x = R() * W, y = R() * (HZ - 40), a = .25 + R() * .6;
+    g.fillStyle = `rgba(255,248,230,${a})`;
+    g.fillRect(x, y, R() < .15 ? 1.6 : 1, R() < .15 ? 1.6 : 1);
+  }
+  // Moon
+  gr = g.createRadialGradient(328, 54, 4, 328, 54, 60);
+  gr.addColorStop(0, 'rgba(255,240,205,.35)'); gr.addColorStop(1, 'rgba(255,240,205,0)');
+  g.fillStyle = gr; g.fillRect(260, 0, 140, 120);
+  g.fillStyle = '#fbefd2'; g.beginPath(); g.arc(328, 54, 14, 0, Math.PI * 2); g.fill();
+  g.fillStyle = 'rgba(200,180,150,.35)'; g.beginPath(); g.arc(323, 50, 3, 0, 7); g.arc(333, 60, 2.2, 0, 7); g.fill();
+  // Tree lines (two layers)
+  const trees = (base, amp, col, seed) => {
+    const r = rng(seed);
+    g.fillStyle = col; g.beginPath(); g.moveTo(0, HZ + 2);
+    let x = -10;
+    while (x < W + 20) {
+      const w = 14 + r() * 26, h = base + r() * amp;
+      g.quadraticCurveTo(x + w / 2, HZ - h - 10, x + w, HZ - base * .4 - r() * 8);
+      x += w;
+    }
+    g.lineTo(W, HZ + 2); g.closePath(); g.fill();
+  };
+  trees(22, 26, '#1d1f3a', 3);
+  trees(10, 18, '#121528', 11);
+  // House with a lit window on the left
+  g.fillStyle = '#0e1122';
+  g.beginPath(); g.moveTo(-10, HZ + 4); g.lineTo(-10, HZ - 52); g.lineTo(38, HZ - 86); g.lineTo(96, HZ - 52); g.lineTo(96, HZ + 4); g.fill();
+  gr = g.createRadialGradient(42, HZ - 34, 2, 42, HZ - 34, 46);
+  gr.addColorStop(0, 'rgba(255,200,110,.45)'); gr.addColorStop(1, 'rgba(255,200,110,0)');
+  g.fillStyle = gr; g.fillRect(-10, HZ - 90, 110, 100);
+  g.fillStyle = '#ffcf7a'; g.fillRect(28, HZ - 46, 26, 20);
+  g.fillStyle = '#0e1122'; g.fillRect(40, HZ - 46, 2, 20); g.fillRect(28, HZ - 37, 26, 2);
+  g.fillStyle = '#e8a94e'; g.fillRect(66, HZ - 34, 14, 36);
+  // Fence posts along the horizon right side
+  g.fillStyle = '#17192f';
+  for (let x = 110; x < W; x += 9) g.fillRect(x, HZ - 14, 6, 16);
+  g.fillRect(104, HZ - 10, W, 2.5); g.fillRect(104, HZ - 4, W, 2.5);
+  // Lawn
+  gr = g.createLinearGradient(0, HZ, 0, H);
+  gr.addColorStop(0, '#16301f'); gr.addColorStop(.35, '#24502c'); gr.addColorStop(1, '#3a7533');
+  g.fillStyle = gr; g.fillRect(0, HZ, W, H - HZ);
+  // Mow stripes converging toward the horizon
+  for (let k = -14; k < 14; k++) {
+    if (k % 2) continue;
+    const w = 1.6, a = proj(k * w, 3, 0), b = proj((k + 1) * w, 3, 0), c = proj((k + 1) * w, 400, 0), d = proj(k * w, 400, 0);
+    g.fillStyle = 'rgba(255,255,230,.035)';
+    g.beginPath(); g.moveTo(a.x, a.y); g.lineTo(b.x, b.y); g.lineTo(c.x, c.y); g.lineTo(d.x, d.y); g.fill();
+  }
+  // Warm light pool around the board
+  const pc = proj(0, 20, 0);
+  gr = g.createRadialGradient(pc.x, pc.y, 10, pc.x, pc.y, 230);
+  gr.addColorStop(0, 'rgba(255,196,120,.26)'); gr.addColorStop(1, 'rgba(255,196,120,0)');
+  g.save(); g.translate(pc.x, pc.y); g.scale(1.25, .55); g.translate(-pc.x, -pc.y);
+  g.fillStyle = gr; g.fillRect(pc.x - 300, pc.y - 300, 600, 600); g.restore();
+  // Grass blades, longer and denser up close
+  const greens = ['#4c8a3c', '#2f6129', '#5e9d48', '#24481f', '#6aa852'];
+  for (let i = 0; i < 2600; i++) {
+    const y = HZ + 4 + Math.pow(R(), .7) * (H - HZ);
+    const t = (y - HZ) / (H - HZ);
+    const x = R() * W, len = 1 + t * 9, lean = (R() - .5) * len * .7;
+    g.strokeStyle = greens[(R() * greens.length) | 0];
+    g.globalAlpha = .25 + t * .5; g.lineWidth = .5 + t * 1.2;
+    g.beginPath(); g.moveTo(x, y); g.lineTo(x + lean, y - len); g.stroke();
+  }
+  g.globalAlpha = 1;
+  // String-light wires; bulbs are drawn live so they can twinkle
+  bulbs = [];
+  const strand = (x0, y0, x1, y1, sag, n) => {
+    g.strokeStyle = 'rgba(10,8,20,.9)'; g.lineWidth = 1.3;
+    g.beginPath();
+    for (let i = 0; i <= 40; i++) {
+      const t = i / 40, x = x0 + (x1 - x0) * t, y = y0 + (y1 - y0) * t + sag * 4 * t * (1 - t);
+      i ? g.lineTo(x, y) : g.moveTo(x, y);
+    }
+    g.stroke();
+    for (let i = 0; i < n; i++) {
+      const t = (i + .5) / n, x = x0 + (x1 - x0) * t, y = y0 + (y1 - y0) * t + sag * 4 * t * (1 - t);
+      g.beginPath(); g.moveTo(x, y); g.lineTo(x, y + 6); g.stroke();
+      bulbs.push({ x, y: y + 9, ph: R() * 6.28, sp: 1.5 + R() * 2.5 });
+    }
+  };
+  strand(-20, 8, 420, 26, 70, 12);
+  strand(-10, 70, 260, 128, 30, 6);
+  // Vignette
+  gr = g.createRadialGradient(W / 2, H * .5, H * .3, W / 2, H * .5, H * .78);
+  gr.addColorStop(0, 'rgba(0,0,0,0)'); gr.addColorStop(1, 'rgba(0,0,10,.55)');
+  g.fillStyle = gr; g.fillRect(0, 0, W, H);
+}
+
+function poly(g, pts) { g.beginPath(); pts.forEach((p, i) => i ? g.lineTo(p.x, p.y) : g.moveTo(p.x, p.y)); g.closePath(); }
+function topQuad(x0, x1, d0, d1) { return [proj(x0, d0, boardZ(d0)), proj(x1, d0, boardZ(d0)), proj(x1, d1, boardZ(d1)), proj(x0, d1, boardZ(d1))]; }
+function circleOnBoard(r, n = 40) {
+  const pts = [];
+  for (let i = 0; i < n; i++) { const a = i / n * Math.PI * 2, x = Math.cos(a) * r, d = HOLE_D + Math.sin(a) * r; pts.push(proj(x, d, boardZ(d))); }
+  return pts;
+}
+
+function drawBoard(g) {
+  const R = rng(21);
+  // Shadow on the lawn
+  g.save();
+  g.shadowColor = 'rgba(0,0,0,.6)'; g.shadowBlur = 14;
+  g.fillStyle = 'rgba(0,0,0,.42)';
+  poly(g, [proj(-1.08, DF - .05, 0), proj(1.08, DF - .05, 0), proj(1.3, DB + 1.1, 0), proj(-1.3, DB + 1.1, 0)]); g.fill();
+  g.restore();
+  // Top surface: warm birch plywood
+  const top = topQuad(-BW, BW, DF, DB);
+  let gr = g.createLinearGradient(0, top[0].y, 0, top[2].y);
+  gr.addColorStop(0, '#f0c48a'); gr.addColorStop(1, '#c9935a');
+  g.fillStyle = gr; poly(g, top); g.fill();
+  // Wood grain, clipped to the top face
+  g.save(); poly(g, top); g.clip();
+  for (let i = 0; i < 34; i++) {
+    const x0 = -BW + R() * 2 * BW, fr = 1 + R() * 3, ph = R() * 6, am = .01 + R() * .03;
+    g.strokeStyle = `rgba(${120 + R() * 30 | 0},${70 + R() * 20 | 0},30,${.12 + R() * .2})`;
+    g.lineWidth = .4 + R() * 1.1;
+    g.beginPath();
+    for (let j = 0; j <= 30; j++) {
+      const d = DF + j / 30 * (DB - DF), x = x0 + Math.sin(d * fr + ph) * am;
+      const p = proj(x, d, boardZ(d)); j ? g.lineTo(p.x, p.y) : g.moveTo(p.x, p.y);
+    }
+    g.stroke();
+  }
+  // Painted slate border band with a cream pinstripe
+  g.fillStyle = '#22385d';
+  g.beginPath();
+  topQuad(-BW, BW, DF, DB).forEach((p, i) => i ? g.lineTo(p.x, p.y) : g.moveTo(p.x, p.y)); g.closePath();
+  topQuad(-BW + .16, BW - .16, DF + .16, DB - .16).reverse().forEach((p, i) => i ? g.lineTo(p.x, p.y) : g.moveTo(p.x, p.y)); g.closePath();
+  g.fill('evenodd');
+  g.strokeStyle = 'rgba(255,236,200,.85)'; g.lineWidth = 1;
+  poly(g, topQuad(-BW + .2, BW - .2, DF + .2, DB - .2)); g.stroke();
+  // Painted ring around the hole
+  g.beginPath();
+  circleOnBoard(.47).forEach((p, i) => i ? g.lineTo(p.x, p.y) : g.moveTo(p.x, p.y)); g.closePath();
+  circleOnBoard(.37).reverse().forEach((p, i) => i ? g.lineTo(p.x, p.y) : g.moveTo(p.x, p.y)); g.closePath();
+  g.fillStyle = '#22385d'; g.fill('evenodd');
+  g.restore();
+  // The hole: visible far inner wall, dark throat
+  const hole = circleOnBoard(HOLE_R);
+  const ys = hole.map(p => p.y), hy0 = Math.min(...ys), hy1 = Math.max(...ys);
+  gr = g.createLinearGradient(0, hy0, 0, hy1);
+  gr.addColorStop(0, '#6b4524'); gr.addColorStop(.42, '#1b1008'); gr.addColorStop(1, '#070403');
+  g.fillStyle = gr; poly(g, hole); g.fill();
+  g.strokeStyle = 'rgba(255,235,200,.55)'; g.lineWidth = 1; poly(g, hole); g.stroke();
+  // Front face of the board
+  const fa = proj(-BW, DF, ZF), fb = proj(BW, DF, ZF), fc = proj(BW, DF, 0), fd = proj(-BW, DF, 0);
+  gr = g.createLinearGradient(0, fa.y, 0, fd.y);
+  gr.addColorStop(0, '#9b6533'); gr.addColorStop(1, '#5e3a1b');
+  g.fillStyle = gr; poly(g, [fa, fb, fc, fd]); g.fill();
+  g.strokeStyle = 'rgba(255,228,180,.75)'; g.lineWidth = 1.2;
+  g.beginPath(); g.moveTo(fa.x, fa.y); g.lineTo(fb.x, fb.y); g.stroke();
+  // Side edge highlights
+  g.strokeStyle = 'rgba(255,230,190,.35)'; g.lineWidth = 1;
+  g.beginPath(); g.moveTo(top[0].x, top[0].y); g.lineTo(top[3].x, top[3].y); g.moveTo(top[1].x, top[1].y); g.lineTo(top[2].x, top[2].y); g.stroke();
+}
+
+/* =====================================================================
+   DRAWING BAGS, PARTICLES, AIM
+   ===================================================================== */
+const COLORS = {
+  blue: { base: '#2f74d8', light: '#7fb2ff', dark: '#173f86', stitch: 'rgba(220,235,255,.8)' },
+  red:  { base: '#d93d33', light: '#ff8a7c', dark: '#7e1a14', stitch: 'rgba(255,225,215,.8)' }
+};
+
+function bagCorners(b, scale, lift) {
+  const c = Math.cos(b.rot), s = Math.sin(b.rot), h = BAG * scale;
+  const out = [];
+  for (const [u, v] of [[-1, -1], [1, -1], [1, 1], [-1, 1]]) {
+    const lx = (u * c - v * s) * h, ld = (u * s + v * c) * h;
+    let z = b.z + lift;
+    if (b.surf === 'b' && b.st !== 'air') z = boardZ(b.d + ld) + lift;
+    out.push(proj(b.x + lx, b.d + ld, z));
+  }
+  return out;
+}
+function pillowPath(g, pts) {
+  g.beginPath();
+  const m = (a, b) => ({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 });
+  let start = m(pts[3], pts[0]); g.moveTo(start.x, start.y);
+  for (let i = 0; i < 4; i++) { const p = pts[i], n = m(pts[i], pts[(i + 1) % 4]); g.quadraticCurveTo(p.x, p.y, n.x, n.y); }
+  g.closePath();
+}
+function drawShadow(g, b) {
+  if (b.st === 'in') return;
+  const on = onBoard(b.x, b.d);
+  const sz = on ? boardZ(b.d) : 0;
+  const hgt = Math.max(0, b.z - sz);
+  const ghost = { ...b, z: sz, surf: on ? 'b' : 'g', st: 'rest' };
+  const pts = bagCorners(ghost, 1 + hgt * .12, 0.004);
+  g.fillStyle = `rgba(0,0,0,${.38 / (1 + hgt * .7)})`;
+  pillowPath(g, pts); g.fill();
+}
+// Airborne bags face the camera and tumble, so they read clearly from any height
+function drawAirBag(g, b, ox = 0, oy = 0, alpha = 1, tumble = true) {
+  if (b.vo) { const k = Math.max(0, 1 - (b.t || 0) / .15); ox += b.vo.x * k; oy += b.vo.y * k; }
+  const col = COLORS[b.p];
+  const c = proj(b.x, b.d, b.z);
+  const size = BAG * 2 * c.s;
+  const squash = tumble ? .5 + .4 * Math.abs(Math.cos(b.rot * 1.3)) : .78;
+  g.save(); g.globalAlpha = alpha;
+  g.translate(c.x + ox, c.y + oy); g.rotate(b.rot * .5);
+  const w = size, h = size * squash, r = size * .28;
+  const path = (sc) => { g.beginPath(); g.roundRect ? g.roundRect(-w * sc / 2, -h * sc / 2, w * sc, h * sc, r * sc) : g.rect(-w * sc / 2, -h * sc / 2, w * sc, h * sc); };
+  const gr = g.createLinearGradient(-w / 2, -h / 2, w / 2, h / 2);
+  gr.addColorStop(0, col.light); gr.addColorStop(.45, col.base); gr.addColorStop(1, col.dark);
+  g.fillStyle = gr; path(1); g.fill();
+  g.setLineDash([Math.max(1.2, w * .06), Math.max(1.2, w * .05)]);
+  g.strokeStyle = col.stitch; g.lineWidth = Math.max(.6, w * .025); path(.76); g.stroke(); g.setLineDash([]);
+  const hg = g.createRadialGradient(-w * .15, -h * .2, 0, 0, 0, w * .6);
+  hg.addColorStop(0, 'rgba(255,255,255,.4)'); hg.addColorStop(1, 'rgba(255,255,255,0)');
+  g.fillStyle = hg; path(1); g.fill();
+  g.strokeStyle = 'rgba(0,0,0,.35)'; g.lineWidth = Math.max(.5, w * .02); path(1); g.stroke();
+  g.restore();
+}
+function drawBag(g, b, ox = 0, oy = 0, alpha = 1) {
+  if (b.st === 'in') return;
+  if (b.st === 'air') return drawAirBag(g, b, ox, oy, alpha);
+  let scale = 1, a = alpha;
+  if (b.st === 'fall') { const t = Math.min(1, b.ft / .35); scale = 1 - t * .55; a *= 1 - t; }
+  const col = COLORS[b.p];
+  const pts = bagCorners(b, scale, .05).map(p => ({ x: p.x + ox, y: p.y + oy }));
+  g.save(); g.globalAlpha = a;
+  // body
+  const xs = pts.map(p => p.x), ys = pts.map(p => p.y);
+  const x0 = Math.min(...xs), x1 = Math.max(...xs), y0 = Math.min(...ys), y1 = Math.max(...ys);
+  const gr = g.createLinearGradient(x0, y0, x1, y1);
+  gr.addColorStop(0, col.light); gr.addColorStop(.45, col.base); gr.addColorStop(1, col.dark);
+  g.fillStyle = gr; pillowPath(g, pts); g.fill();
+  // stitched seam
+  const cx = (x0 + x1) / 2, cy = (y0 + y1) / 2;
+  const inner = pts.map(p => ({ x: cx + (p.x - cx) * .76, y: cy + (p.y - cy) * .76 }));
+  const span = Math.max(x1 - x0, 6);
+  g.setLineDash([Math.max(1.2, span * .06), Math.max(1.2, span * .05)]);
+  g.strokeStyle = col.stitch; g.lineWidth = Math.max(.6, span * .025);
+  pillowPath(g, inner); g.stroke();
+  g.setLineDash([]);
+  // puffy highlight
+  const hg = g.createRadialGradient(cx - span * .15, cy - span * .15, 0, cx, cy, span * .6);
+  hg.addColorStop(0, 'rgba(255,255,255,.35)'); hg.addColorStop(1, 'rgba(255,255,255,0)');
+  g.fillStyle = hg; pillowPath(g, pts); g.fill();
+  g.strokeStyle = 'rgba(0,0,0,.35)'; g.lineWidth = Math.max(.5, span * .02);
+  pillowPath(g, pts); g.stroke();
+  g.restore();
+}
+
+let particles = [];
+let shake = 0;
+function burst(kind, b) {
+  const p = proj(b.x, b.d, b.z);
+  if (kind === 'hole') {
+    const hp = proj(0, HOLE_D, boardZ(HOLE_D));
+    particles.push({ t: 'ring', x: hp.x, y: hp.y, life: 0, max: .7 });
+    const cols = [COLORS[b.p].light, COLORS[b.p].base, '#ffc94a', '#fff3d6'];
+    for (let i = 0; i < 60; i++) {
+      const a = -Math.PI / 2 + (Math.random() - .5) * 2.2, s = 120 + Math.random() * 260;
+      particles.push({ t: 'conf', x: hp.x, y: hp.y, vx: Math.cos(a) * s, vy: Math.sin(a) * s, r: Math.random() * 6, vr: (Math.random() - .5) * 14,
+        c: cols[i % cols.length], life: 0, max: 1.2 + Math.random() * .6, w: 3 + Math.random() * 4 });
+    }
+    shake = 7;
+  } else if (kind === 'board') {
+    for (let i = 0; i < 12; i++) {
+      const a = Math.random() * Math.PI * 2, s = 20 + Math.random() * 50;
+      particles.push({ t: 'dust', x: p.x, y: p.y, vx: Math.cos(a) * s, vy: Math.sin(a) * s * .4 - 8, life: 0, max: .5 + Math.random() * .3, r: 2 + Math.random() * 3 });
+    }
+    shake = 3.5;
+  } else if (kind === 'ground') {
+    for (let i = 0; i < 14; i++) {
+      const a = -Math.PI / 2 + (Math.random() - .5) * 1.8, s = 40 + Math.random() * 80;
+      particles.push({ t: 'grass', x: p.x, y: p.y, vx: Math.cos(a) * s, vy: Math.sin(a) * s, life: 0, max: .45 + Math.random() * .3, c: Math.random() < .5 ? '#6aa852' : '#3f7a33' });
+    }
+    shake = 1.5;
+  }
+}
+function drawParticles(g, dt) {
+  particles = particles.filter(p => (p.life += dt) < p.max);
+  for (const p of particles) {
+    const k = p.life / p.max;
+    if (p.t === 'ring') {
+      g.strokeStyle = `rgba(255,214,120,${1 - k})`; g.lineWidth = 3 * (1 - k) + .5;
+      g.beginPath(); g.ellipse(p.x, p.y, 10 + k * 70, 4 + k * 26, 0, 0, Math.PI * 2); g.stroke();
+      continue;
+    }
+    if (p.vy !== undefined) { p.x += p.vx * dt; p.y += p.vy * dt; }
+    if (p.t === 'conf') {
+      p.vy += 420 * dt; p.vx *= .985; p.r += p.vr * dt;
+      g.save(); g.translate(p.x, p.y); g.rotate(p.r); g.globalAlpha = 1 - k * k;
+      g.fillStyle = p.c; g.fillRect(-p.w / 2, -p.w * .3, p.w, p.w * .6 * Math.abs(Math.cos(p.r * 2)) + .6); g.restore();
+    } else if (p.t === 'dust') {
+      g.fillStyle = `rgba(236,208,160,${.5 * (1 - k)})`;
+      g.beginPath(); g.arc(p.x, p.y, p.r + k * 6, 0, Math.PI * 2); g.fill();
+    } else if (p.t === 'grass') {
+      p.vy += 300 * dt;
+      g.strokeStyle = p.c; g.globalAlpha = 1 - k; g.lineWidth = 1.4;
+      g.beginPath(); g.moveTo(p.x, p.y); g.lineTo(p.x - p.vx * .02, p.y - p.vy * .02); g.stroke(); g.globalAlpha = 1;
+    }
+  }
+}
+
+/* =====================================================================
+   SOUND (tiny synth, no files)
+   ===================================================================== */
+let AC = null, soundOn = true;
+try { soundOn = localStorage.getItem('bbt-sound') !== 'off'; } catch (e) {}
+function ensureAudio() {
+  if (!AC) { try { AC = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) {} }
+  if (AC && AC.state === 'suspended') AC.resume();
+}
+function noise(dur, type, freq, vol, sweepTo) {
+  if (!AC || !soundOn) return;
+  const len = Math.floor(AC.sampleRate * dur), buf = AC.createBuffer(1, len, AC.sampleRate), d = buf.getChannelData(0);
+  for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * (1 - i / len);
+  const src = AC.createBufferSource(); src.buffer = buf;
+  const f = AC.createBiquadFilter(); f.type = type; f.frequency.value = freq;
+  if (sweepTo) f.frequency.exponentialRampToValueAtTime(sweepTo, AC.currentTime + dur);
+  const gn = AC.createGain(); gn.gain.value = vol;
+  src.connect(f); f.connect(gn); gn.connect(AC.destination); src.start();
+}
+function tone(freq, at, dur, vol, type = 'triangle') {
+  if (!AC || !soundOn) return;
+  const o = AC.createOscillator(), gn = AC.createGain();
+  o.type = type; o.frequency.value = freq;
+  const t = AC.currentTime + at;
+  gn.gain.setValueAtTime(0, t); gn.gain.linearRampToValueAtTime(vol, t + .02); gn.gain.exponentialRampToValueAtTime(.001, t + dur);
+  o.connect(gn); gn.connect(AC.destination); o.start(t); o.stop(t + dur + .05);
+}
+const sfx = {
+  whoosh() { noise(.3, 'bandpass', 600, .35, 2400); },
+  thud(v = .6) { noise(.14, 'lowpass', 380, v); tone(90, 0, .12, v * .5, 'sine'); },
+  grass() { noise(.12, 'highpass', 1800, .15); noise(.1, 'lowpass', 300, .3); },
+  hole() { noise(.25, 'lowpass', 250, .5); [523, 659, 784, 1047].forEach((f, i) => tone(f, .08 + i * .08, .35, .18)); },
+  bump() { noise(.08, 'lowpass', 500, .25); },
+  click() { tone(660, 0, .06, .08, 'square'); }
+};
+
+/* =====================================================================
+   GAME STATE + FLOW
+   ===================================================================== */
+const $ = id => document.getElementById(id);
+let mode = null;            // 'cpu' | 'local' | 'online'
+let me = null;              // online: 'blue' | 'red'
+let game = null;
+let bags = [];
+let animating = false, throwBy = null, pendingGame = null;
+let lastMsgId = null, cpuTimer = null, cpuAim = null, inningTimerRev = null, inningTimer = null;
+let drag = null, hintShown = true;
+let room = null, db = null, oppOnline = false, throwInit = false, lastThrowId = null;
+
+let clientId;
+try { clientId = localStorage.getItem('bbt-id'); } catch (e) {}
+if (!clientId) { clientId = Math.random().toString(36).slice(2, 12); try { localStorage.setItem('bbt-id', clientId); } catch (e) {} }
+
+const opp = c => c === 'blue' ? 'red' : 'blue';
+const uid = () => Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
+const clone = o => JSON.parse(JSON.stringify(o));
+const toArr = x => Array.isArray(x) ? x : x ? Object.values(x) : [];
+
+function newGame(first = 'blue') {
+  return { score: { blue: 0, red: 0 }, inning: 1, turn: first, first, left: { blue: 4, red: 4 },
+           bags: [], phase: 'aim', msg: null, inningResult: null, winner: null, auth: null, rev: 0 };
+}
+function nameOf(c) {
+  if (mode === 'cpu') return c === 'blue' ? 'You' : 'Computer';
+  if (mode === 'online') return c === me ? 'You' : 'Friend';
+  return c === 'blue' ? 'Blue' : 'Red';
+}
+function isAuthority(c) { return mode !== 'online' || c === me; }
+
+function commit(g) {
+  g.rev = (g.rev || 0) + 1;
+  if (mode === 'online' && room) room.child('game').set(g);
+  else applyGame(g);
+}
+
+function applyGame(g) {
+  if (!g) return;
+  if (animating) { pendingGame = g; return; }
+  game = g;
+  game.score = game.score || { blue: 0, red: 0 };
+  game.left = game.left || { blue: 0, red: 0 };
+  bags = toArr(g.bags).map(fromSer);
+  if (g.msg && g.msg.id !== lastMsgId) {
+    const fresh = lastMsgId !== null || g.phase === 'aim' || g.phase === 'inning';
+    lastMsgId = g.msg.id;
+    if (fresh) showToast(g.msg);
+  }
+  updateHUD();
+  updatePanels();
+  maybeCpu();
+  if (mode === 'online' && me === 'blue' && g.phase === 'waiting' && oppOnline) commit({ ...newGame('blue'), rev: g.rev });
+  if (g.phase === 'inning' && isAuthority(g.auth) && inningTimerRev !== g.rev) {
+    inningTimerRev = g.rev;
+    clearTimeout(inningTimer);
+    inningTimer = setTimeout(nextInning, 2900);
+  }
+}
+
+function canThrow() {
+  if (!game || game.phase !== 'aim' || animating || cpuAim) return false;
+  if (mode === 'local') return true;
+  if (mode === 'cpu') return game.turn === 'blue';
+  if (mode === 'online') return game.turn === me && oppOnline;
+  return false;
+}
+
+function startThrow(t, local) {
+  const b = makeBag(t.by || game.turn, t);
+  bags.push(b);
+  if (t.voy) b.vo = { x: 0, y: t.voy };
+  throwBy = b.p;
+  animating = true;
+  sfx.whoosh();
+  if (mode === 'online' && local && room) {
+    const id = uid(); lastThrowId = id;
+    room.child('throw').set({ id, by: me, vx: t.vx, vd: t.vd, vz: t.vz, spin: t.spin, rot0: t.rot0, x0: t.x0 || 0 });
+  }
+  updateHUD();
+}
+
+function onSettled() {
+  animating = false;
+  if (isAuthority(throwBy)) resolveThrow();
+  else if (pendingGame) { const g = pendingGame; pendingGame = null; applyGame(g); }
+}
+
+function resolveThrow() {
+  const thrown = bags[bags.length - 1];
+  const holesBefore = toArr(game.bags).filter(o => o.s === 'h').length;
+  const holesAfter = bags.filter(b => b.st === 'in').length;
+  let kind, text, sub = '';
+  if (thrown.st === 'in') { kind = 'hole'; text = 'Cornhole!'; sub = '+3'; }
+  else if (holesAfter > holesBefore) { kind = 'hole'; text = 'Knocked in!'; sub = 'Bag pushed through the hole'; }
+  else if (thrown.surf === 'b' && onBoard(thrown.x, thrown.d)) { kind = 'board'; text = 'On the board'; sub = '+1'; }
+  else { kind = 'off'; text = 'Off the board'; }
+  const g = clone(game);
+  g.bags = bags.map(serBag);
+  g.left[g.turn] = Math.max(0, g.left[g.turn] - 1);
+  g.msg = { id: uid(), kind, text, sub, by: g.turn };
+  g.auth = g.turn;
+  if (g.left.blue === 0 && g.left.red === 0) {
+    const pts = { blue: 0, red: 0 };
+    bags.forEach(b => pts[b.p] += bagPoints(b));
+    const diff = pts.blue - pts.red;
+    const who = diff > 0 ? 'blue' : diff < 0 ? 'red' : null;
+    if (who) g.score[who] += Math.abs(diff);
+    g.inningResult = { blue: pts.blue, red: pts.red, who, pts: Math.abs(diff) };
+    g.phase = 'inning';
+  } else {
+    const o = opp(g.turn);
+    g.turn = g.left[o] > 0 ? o : g.turn;
+    g.phase = 'aim';
+  }
+  commit(g);
+}
+
+function nextInning() {
+  if (!game || game.phase !== 'inning') return;
+  const g = clone(game);
+  const s = g.score;
+  if (Math.max(s.blue, s.red) >= 21 && s.blue !== s.red) {
+    g.phase = 'over'; g.winner = s.blue > s.red ? 'blue' : 'red';
+  } else {
+    if (g.inningResult && g.inningResult.who) g.first = g.inningResult.who;
+    g.inning += 1; g.bags = []; g.left = { blue: 4, red: 4 };
+    g.turn = g.first; g.phase = 'aim'; g.inningResult = null;
+  }
+  commit(g);
+}
+
+/* ---------- Throw parameters ---------- */
+// The bag is held with a finger and swung. Release speed sets the power, release
+// direction sets left/right, and where you let go sets where the bag starts.
+const HOME = (() => { const q = proj(START.x, START.d, START.z); return { x: q.x, y: q.y, s: q.s }; })();
+const SWIPE_MIN = 500, SWIPE_MAX = 3300;   // logical px per second
+function swipeVelocity(smp, now) {
+  if (smp.length < 2) return { vx: 0, vy: 0 };
+  const last = smp[smp.length - 1];
+  if (now - last.t > 120) return { vx: 0, vy: 0 };      // finger stopped before lifting
+  let first = last;
+  for (let i = smp.length - 2; i >= 0; i--) { if (last.t - smp[i].t > 100) break; first = smp[i]; }
+  const dt = Math.max(.012, (last.t - first.t) / 1000);
+  return { vx: (last.x - first.x) / dt, vy: (last.y - first.y) / dt };
+}
+function throwFromSwipe(vx, vy, bagX) {
+  const sp = Math.sqrt(vx * vx + vy * vy);
+  const pw = Math.max(0, Math.min(1, (sp - SWIPE_MIN) / (SWIPE_MAX - SWIPE_MIN)));
+  const v = 14 + pw * 11;
+  const vd = v * .79, vz = v * .61;
+  const ang = Math.max(-1, Math.min(1, Math.atan2(vx, -vy)));   // 0 = straight up the screen
+  const lat = Math.max(-.6, Math.min(.6, Math.tan(ang)));
+  return { vx: vd * lat * .1, vd, vz, x0: (bagX - HOME.x) / HOME.s,
+           spin: (Math.random() - .5) * 5 + lat * 8, rot0: (Math.random() - .5) * .6 };
+}
+function throwFromPower(p, aim, jitter = true) {
+  const v = 14 + p * 11;
+  let vd = v * .79, vz = v * .61;
+  let vx = aim * vd * .3;
+  if (jitter) { vx += (Math.random() - .5) * .3 * p; vd *= 1 + (Math.random() - .5) * .025; }
+  return { vx, vd, vz, spin: (Math.random() - .5) * 5 + aim * 4, rot0: (Math.random() - .5) * .6 };
+}
+/* ---------- Computer opponent ---------- */
+function simulateFinal(p, aim) {
+  const t = throwFromPower(p, aim, false);
+  const sim = [makeBag('red', t)];
+  for (let i = 0; i < 900 && !allSettled(sim); i++) physStep(sim, STEP, null);
+  return sim[0];
+}
+let cpuBestP = null;
+function maybeCpu() {
+  if (mode !== 'cpu' || !game || game.phase !== 'aim' || game.turn !== 'red' || animating || cpuTimer || cpuAim) return;
+  cpuTimer = setTimeout(() => {
+    cpuTimer = null;
+    if (mode !== 'cpu' || game.turn !== 'red' || game.phase !== 'aim') return;
+    if (cpuBestP === null) {
+      let best = 1e9;
+      for (let p = .2; p <= 1; p += .005) {
+        const b = simulateFinal(p, 0);
+        const score = b.st === 'in' ? 0 : holeDist(b.x, b.d) + (b.surf === 'b' ? 0 : 3);
+        if (score < best) { best = score; cpuBestP = p; }
+      }
+    }
+    const gauss = () => (Math.random() + Math.random() + Math.random() - 1.5) / 1.5;
+    const p = Math.max(.1, Math.min(1, cpuBestP + gauss() * .045));
+    const aim = gauss() * .12;
+    cpuAim = { p, aim, t0: performance.now() };
+    setTimeout(() => {
+      if (!cpuAim) return;
+      const t = throwFromPower(cpuAim.p, cpuAim.aim, true);
+      cpuAim = null;
+      if (mode === 'cpu' && game.phase === 'aim') startThrow({ ...t, by: 'red' }, true);
+    }, 750);
+  }, 900);
+}
+
+/* =====================================================================
+   UI
+   ===================================================================== */
+function updateHUD() {
+  if (!game) return;
+  $('scoreBlue').textContent = game.score.blue;
+  $('scoreRed').textContent = game.score.red;
+  $('inningNum').textContent = game.inning;
+  $('nameBlue').textContent = nameOf('blue');
+  $('nameRed').textContent = nameOf('red');
+  for (const c of ['blue', 'red']) {
+    const el = $(c === 'blue' ? 'pipsBlue' : 'pipsRed');
+    const left = game.left[c] - (animating && throwBy === c ? 1 : 0);
+    el.innerHTML = '';
+    for (let i = 0; i < 4; i++) { const s = document.createElement('span'); s.className = 'pip' + (i < left ? ' on' : ''); el.appendChild(s); }
+  }
+  const active = game.phase === 'aim' || animating ? (animating ? throwBy : game.turn) : null;
+  $('teamBlue').classList.toggle('active', active === 'blue');
+  $('teamRed').classList.toggle('active', active === 'red');
+  let txt = '', col = null;
+  if (game.phase === 'waiting') txt = 'Waiting for your friend to join';
+  else if (mode === 'online' && !oppOnline && game.phase !== 'over') txt = 'Your friend lost connection. Waiting for them to return';
+  else if (game.phase === 'aim' && !animating) {
+    col = game.turn;
+    if (mode === 'local') txt = `${nameOf(game.turn)} to throw`;
+    else txt = nameOf(game.turn) === 'You' ? 'Your throw' : `${nameOf(game.turn)} is throwing`;
+  }
+  $('turn').innerHTML = col ? `<span class="dot" style="background:${COLORS[col].base}"></span>${txt}` : txt;
+  $('hint').style.opacity = hintShown && canThrow() ? .85 : 0;
+}
+
+function updatePanels() {
+  const ph = game ? game.phase : null;
+  $('waitPanel').classList.toggle('hidden', !(mode === 'online' && ph === 'waiting'));
+  $('inningPanel').classList.toggle('hidden', ph !== 'inning');
+  $('overPanel').classList.toggle('hidden', ph !== 'over');
+  if (ph === 'inning' && game.inningResult) {
+    const r = game.inningResult;
+    $('inningTitle').textContent = `End of inning ${game.inning}`;
+    $('inBlueName').textContent = nameOf('blue'); $('inRedName').textContent = nameOf('red');
+    $('inBlue').textContent = r.blue; $('inRed').textContent = r.red;
+    $('inningResult').textContent = r.who
+      ? `${nameOf(r.who)} ${nameOf(r.who) === 'You' ? 'score' : 'scores'} ${r.pts} point${r.pts === 1 ? '' : 's'}`
+      : 'Points cancel out. No score this inning';
+  }
+  if (ph === 'over') {
+    const w = game.winner, n = nameOf(w);
+    $('overTitle').textContent = n === 'You' ? 'You win!' : `${n} wins!`;
+    $('overTitle').style.color = w === 'blue' ? 'var(--blue-soft)' : 'var(--red-soft)';
+    $('finBlue').textContent = game.score.blue; $('finRed').textContent = game.score.red;
+    $('overSub').textContent = `${game.inning} inning${game.inning === 1 ? '' : 's'} played`;
+  }
+}
+
+let toastTimer;
+function showToast(m) {
+  const t = $('toast');
+  t.className = 'toast'; void t.offsetWidth;
+  t.innerHTML = `${m.text}${m.sub ? `<small>${m.sub}</small>` : ''}`;
+  t.classList.add(m.kind, 'show');
+  clearTimeout(toastTimer); toastTimer = setTimeout(() => t.className = 'toast', 1700);
+}
+
+function showScreen(which) {
+  $('menu').classList.toggle('hidden', which !== 'menu');
+  $('hud').classList.toggle('hidden', which !== 'game');
+  if (which === 'menu') {
+    ['waitPanel', 'inningPanel', 'overPanel'].forEach(id => $(id).classList.add('hidden'));
+    $('menuMain').classList.remove('hidden'); $('menuOnline').classList.add('hidden');
+  }
+}
+
+function demoBags() {
+  bags = [
+    { p: 'blue', x: -.42, d: 20.6, r: .5, s: 'b' }, { p: 'red', x: .36, d: 19.4, r: -.3, s: 'b' },
+    { p: 'blue', x: .15, d: 21.7, r: 1.1, s: 'b' }, { p: 'red', x: 1.6, d: 17.2, r: .2, s: 'g' }
+  ].map(fromSer);
+}
+
+function startLocal(m) {
+  leaveRoom();
+  mode = m; me = null; animating = false; pendingGame = null; lastMsgId = null; cpuAim = null; cpuBestP = null;
+  clearTimeout(cpuTimer); cpuTimer = null; clearTimeout(inningTimer);
+  showScreen('game');
+  applyGame(newGame('blue'));
+}
+
+function backToMenu() {
+  leaveRoom();
+  mode = null; game = null; animating = false; pendingGame = null; cpuAim = null;
+  clearTimeout(cpuTimer); cpuTimer = null; clearTimeout(inningTimer);
+  demoBags();
+  showScreen('menu');
+}
+
+/* =====================================================================
+   ONLINE (Firebase Realtime Database)
+   rooms/{CODE}: { players: {blue,red}, game: {...}, throw: {...} }
+   ===================================================================== */
+function initFirebase() {
+  if (db) return true;
+  if (!FIREBASE_CONFIG.databaseURL || typeof firebase === 'undefined') return false;
+  try { if (!firebase.apps.length) firebase.initializeApp(FIREBASE_CONFIG); db = firebase.database(); return true; }
+  catch (e) { console.error(e); return false; }
+}
+function setOnlineErr(t) { $('onlineErr').textContent = t || ''; }
+function genCode() { const A = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789'; let s = ''; for (let i = 0; i < 4; i++) s += A[(Math.random() * A.length) | 0]; return s; }
+
+async function createRoom() {
+  if (!initFirebase()) return setOnlineErr('Online play needs your Firebase config. Add it at the top of index.html.');
+  setOnlineErr('Creating game…');
+  for (let tries = 0; tries < 6; tries++) {
+    const code = genCode(), ref = db.ref('rooms/' + code);
+    const init = { created: Date.now(), players: { blue: { id: clientId, online: true } }, game: { ...newGame('blue'), phase: 'waiting' } };
+    try {
+      const res = await ref.transaction(cur => cur ? undefined : init);
+      if (res.committed) { setOnlineErr(''); me = 'blue'; enterRoom(code); return; }
+    } catch (e) { console.error(e); return setOnlineErr('Could not reach the database. Check your Firebase rules and config.'); }
+  }
+  setOnlineErr('Could not create a game. Try again.');
+}
+
+async function joinRoom(raw) {
+  const code = (raw || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+  if (code.length !== 4) return setOnlineErr('Enter the 4-letter code your friend sent you.');
+  if (!initFirebase()) return setOnlineErr('Online play needs your Firebase config. Add it at the top of index.html.');
+  setOnlineErr('Joining…');
+  try {
+    const ref = db.ref('rooms/' + code);
+    const snap = await ref.once('value');
+    if (!snap.exists()) return setOnlineErr(`No game found with code ${code}. Check the code and try again.`);
+    const players = snap.val().players || {};
+    if (players.blue && players.blue.id === clientId) me = 'blue';
+    else if (players.red && players.red.id === clientId) me = 'red';
+    else {
+      const res = await ref.child('players/red').transaction(cur => (!cur || cur.id === clientId) ? { id: clientId, online: true } : undefined);
+      if (!res.committed) return setOnlineErr('That game already has two players.');
+      me = 'red';
+    }
+    setOnlineErr('');
+    enterRoom(code);
+  } catch (e) { console.error(e); setOnlineErr('Could not reach the database. Check your Firebase rules and config.'); }
+}
+
+function enterRoom(code) {
+  leaveRoom();
+  mode = 'online'; room = db.ref('rooms/' + code);
+  animating = false; pendingGame = null; lastMsgId = null; throwInit = false; lastThrowId = null; oppOnline = false;
+  $('waitCode').textContent = code;
+  try { history.replaceState(null, '', location.pathname + '?room=' + code); } catch (e) {}
+  const myOnline = room.child(`players/${me}/online`);
+  myOnline.set(true); myOnline.onDisconnect().set(false);
+  room.child('players').on('value', s => {
+    const pl = s.val() || {};
+    const o = pl[opp(me)];
+    oppOnline = !!(o && o.online);
+    if (me === 'blue' && o && game && game.phase === 'waiting') commit({ ...newGame('blue'), rev: game.rev });
+    updateHUD();
+  });
+  room.child('game').on('value', s => applyGame(s.val()));
+  room.child('throw').on('value', s => {
+    const t = s.val();
+    if (!throwInit) { throwInit = true; lastThrowId = t ? t.id : null; return; }
+    if (!t || t.id === lastThrowId) return;
+    lastThrowId = t.id;
+    if (t.by === me) return;
+    if (pendingGame) { const g = pendingGame; pendingGame = null; animating = false; applyGame(g); }
+    startThrow(t, false);
+  });
+  showScreen('game');
+}
+
+function leaveRoom() {
+  if (room) {
+    room.child('players').off(); room.child('game').off(); room.child('throw').off();
+    if (me) room.child(`players/${me}/online`).set(false);
+    room = null;
+    try { history.replaceState(null, '', location.pathname); } catch (e) {}
+  }
+}
+
+/* =====================================================================
+   INPUT
+   ===================================================================== */
+function toLogical(e) { const r = canvas.getBoundingClientRect(); return { x: (e.clientX - r.left) / K, y: (e.clientY - r.top) / K }; }
+const clampN = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+canvas.addEventListener('pointerdown', e => {
+  ensureAudio();
+  if (!canThrow()) return;
+  const p = toLogical(e);
+  if (Math.abs(p.x - HOME.x) > 85 || Math.abs(p.y - HOME.y) > 75) return;   // must grab the bag
+  drag = { gx: HOME.x - p.x, gy: HOME.y - p.y, x: HOME.x, y: HOME.y, vx: 0, vy: 0, s: [{ x: p.x, y: p.y, t: e.timeStamp }] };
+  try { canvas.setPointerCapture(e.pointerId); } catch (_) {}
+});
+canvas.addEventListener('pointermove', e => {
+  if (!drag) return;
+  const evs = e.getCoalescedEvents ? e.getCoalescedEvents() : [];
+  for (const ev of (evs.length ? evs : [e])) {
+    const p = toLogical(ev);
+    drag.s.push({ x: p.x, y: p.y, t: ev.timeStamp });
+    drag.x = clampN(p.x + drag.gx, 50, 350);
+    drag.y = clampN(p.y + drag.gy, 330, 630);
+  }
+  while (drag.s.length > 2 && drag.s[drag.s.length - 1].t - drag.s[0].t > 250) drag.s.shift();
+  const v = swipeVelocity(drag.s, e.timeStamp); drag.vx = v.vx; drag.vy = v.vy;
+});
+function release(e) {
+  if (!drag) return;
+  const d = drag; drag = null;
+  if (!canThrow()) return;
+  const v = swipeVelocity(d.s, e ? e.timeStamp : performance.now());
+  window.__lastSwipe = v;
+  if (v.vy > -300) {                         // not a real upward swing: bag goes back
+    $('hint').textContent = 'Swing the bag up toward the board, then let go';
+    hintShown = true; $('hint').style.opacity = .95;
+    return;
+  }
+  hintShown = false;
+  startThrow({ ...throwFromSwipe(v.vx, v.vy, d.x), voy: d.y - HOME.y, by: game.turn }, true);
+}
+canvas.addEventListener('pointerup', release);
+canvas.addEventListener('pointercancel', () => drag = null);
+
+$('cpuBtn').onclick = () => { ensureAudio(); sfx.click(); startLocal('cpu'); };
+$('localBtn').onclick = () => { ensureAudio(); sfx.click(); startLocal('local'); };
+$('onlineBtn').onclick = () => {
+  ensureAudio(); sfx.click();
+  $('menuMain').classList.add('hidden'); $('menuOnline').classList.remove('hidden');
+  setOnlineErr(initFirebase() ? '' : 'Online play needs your Firebase config. Add it at the top of index.html.');
+};
+$('backBtn').onclick = () => { $('menuMain').classList.remove('hidden'); $('menuOnline').classList.add('hidden'); setOnlineErr(''); };
+$('createBtn').onclick = () => { ensureAudio(); createRoom(); };
+$('joinBtn').onclick = () => { ensureAudio(); joinRoom($('codeInput').value); };
+$('codeInput').addEventListener('input', e => e.target.value = e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, ''));
+$('codeInput').addEventListener('keydown', e => { if (e.key === 'Enter') joinRoom(e.target.value); });
+$('quitBtn').onclick = backToMenu;
+$('overMenuBtn').onclick = backToMenu;
+$('cancelWaitBtn').onclick = () => { const r = room; if (r) r.child(`players/${me}/online`).onDisconnect().cancel(); backToMenu(); if (r) r.remove(); };
+$('againBtn').onclick = () => {
+  const loserFirst = game && game.winner ? opp(game.winner) : 'blue';
+  hintShown = mode !== 'online';
+  commit({ ...newGame(loserFirst), rev: game ? game.rev : 0 });
+};
+$('copyBtn').onclick = async () => {
+  const link = location.origin + location.pathname + '?room=' + $('waitCode').textContent;
+  try { await navigator.clipboard.writeText(link); $('copyBtn').textContent = 'Link copied'; }
+  catch (e) { prompt('Copy this invite link', link); }
+  setTimeout(() => $('copyBtn').textContent = 'Copy invite link', 2000);
+};
+function syncSoundBtn() { $('soundBtn').textContent = soundOn ? 'Sound on' : 'Sound off'; }
+$('soundBtn').onclick = () => { soundOn = !soundOn; try { localStorage.setItem('bbt-sound', soundOn ? 'on' : 'off'); } catch (e) {} syncSoundBtn(); };
+syncSoundBtn();
+
+/* =====================================================================
+   MAIN LOOP
+   ===================================================================== */
+let last = performance.now(), acc = 0;
+const reduceMotion = window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+function frame(now) {
+  const dt = Math.min(.05, (now - last) / 1000); last = now;
+  if (animating) {
+    acc += dt;
+    while (acc >= STEP) {
+      const ev = [];
+      physStep(bags, STEP, ev);
+      for (const e of ev) {
+        if (e.type === 'land') { if (e.surf === 'b') { burst('board', e.b); sfx.thud(.7); } else { burst('ground', e.b); sfx.grass(); } }
+        else if (e.type === 'hole') { burst('hole', e.b); sfx.hole(); }
+        else if (e.type === 'knock') { sfx.thud(.5); shake = 2; }
+        else if (e.type === 'bump') sfx.bump();
+      }
+      acc -= STEP;
+    }
+    if (allSettled(bags)) { acc = 0; onSettled(); }
+  }
+  render(now / 1000, dt);
+  requestAnimationFrame(frame);
+}
+
+function render(t, dt) {
+  ctx.setTransform(K * DPR, 0, 0, K * DPR, 0, 0);
+  ctx.clearRect(0, 0, W, H);
+  ctx.save();
+  if (shake > .05 && !reduceMotion) { ctx.translate((Math.random() - .5) * shake, (Math.random() - .5) * shake); }
+  shake *= .86;
+  ctx.drawImage(bgLayer, 0, 0, W, H);
+  // twinkling bulbs
+  for (const b of bulbs) {
+    const f = .78 + .22 * Math.sin(t * b.sp + b.ph);
+    ctx.globalAlpha = f; ctx.drawImage(glowSprite, b.x - 22, b.y - 22, 44, 44);
+    ctx.globalAlpha = 1; ctx.fillStyle = '#fff1c9';
+    ctx.beginPath(); ctx.arc(b.x, b.y, 2.6, 0, Math.PI * 2); ctx.fill();
+  }
+  // bags behind the board, then the board, then the rest (far to near)
+  const sorted = bags.filter(b => b.st !== 'in').sort((a, b) => b.d - a.d);
+  const behind = sorted.filter(b => b.d > DB && b.st !== 'fall');
+  const front = sorted.filter(b => !(b.d > DB && b.st !== 'fall'));
+  behind.forEach(b => drawShadow(ctx, b)); behind.forEach(b => drawBag(ctx, b));
+  ctx.drawImage(boardLayer, 0, 0, W, H);
+  front.forEach(b => drawShadow(ctx, b));
+  front.forEach(b => drawBag(ctx, b));
+  drawParticles(ctx, dt);
+  drawReadyBag(t);
+  ctx.restore();
+}
+
+function drawReadyBag(t) {
+  if (!game || game.phase !== 'aim' || animating) return;
+  const c = game.turn;
+  let ox = 0, oy = Math.sin(t * 2.4) * 3, rot = Math.sin(t * .8) * .08;
+  if (drag) {                                  // bag follows the finger
+    ox = drag.x - HOME.x; oy = drag.y - HOME.y;
+    rot = clampN(drag.vx * .0004, -.45, .45);
+  } else if (cpuAim) {                         // computer winds up
+    const k = Math.min(1, (performance.now() - cpuAim.t0) / 600);
+    ox = -cpuAim.aim * 60 * k; oy = 38 * k;
+  }
+  const b = { p: c, x: START.x, d: START.d, z: START.z, rot, st: 'air', surf: null };
+  const mine = mode !== 'online' || c === me;  // dim the bag when it is the other player's turn
+  drawAirBag(ctx, b, ox, oy, mine ? 1 : .55, false);
+}
+
+/* =====================================================================
+   BOOT
+   ===================================================================== */
+if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
+  window.addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}));
+}
+window.addEventListener('resize', resize);
+resize();
+demoBags();
+showScreen('menu');
+requestAnimationFrame(frame);
+
+const params = new URLSearchParams(location.search);
+const roomParam = params.get('room');
+if (roomParam) {
+  $('menuMain').classList.add('hidden'); $('menuOnline').classList.remove('hidden');
+  $('codeInput').value = roomParam.toUpperCase();
+  if (initFirebase()) joinRoom(roomParam);
+  else setOnlineErr('Online play needs your Firebase config. Add it at the top of index.html.');
+}
+</script>
+</body>
+</html>
